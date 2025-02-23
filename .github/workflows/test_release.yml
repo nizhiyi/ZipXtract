@@ -1,4 +1,9 @@
 name: Test Release
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
 
 jobs:
   build:
@@ -40,9 +45,14 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
-        - name: Upload release
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: "build/app/outputs/flutter-apk/*.apk"
+      - name: Install curl
+        run: sudo apt-get install -y curl
+
+      - name: Upload APK to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendDocument" \
+          -F chat_id=${{ env.TELEGRAM_CHAT_ID }} \
+          -F document=@${{ steps.sign_app.outputs.signedReleaseFile }}
