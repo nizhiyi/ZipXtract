@@ -50,6 +50,7 @@
     <string name="select_files">Add (%d)</string>
     <string name="donate_desc">If you find ZipXtract useful, please consider supporting its development:</string>
     <string name="file_list_is_fixed_for_this_operation">File list is fixed for this operation.</string>
+    <string name="no_match">No match</string>
 
     <!-- Bottom navigation -->
     <string name="archive">Archive</string>
@@ -91,6 +92,7 @@
     <string name="add_folder_confirmation_title">Add current folder?</string>
     <string name="add_folder_confirmation_message">Do you want to add the folder \'%1$s\' to the archive?</string>
     <string name="split_parts_number_req">Allow more than 100 split parts</string>
+    <string name="compare">Compare</string>
 
     <!-- Menu items -->
     <string name="move">Move to</string>
@@ -167,6 +169,7 @@
     <string name="no_valid_files_found_to_archive">No valid files found to archive.</string>
     <string name="invalid_archive_type">Invalid archive type</string>
 
+
     <!-- Notification title-->
     <string name="copying_files">Copying…</string>
     <string name="moving_files">Moving…</string>
@@ -201,4 +204,7 @@
     <string name="liberapay" translatable="false">Liberapay</string>
     <string name="author_wirelessalien" translatable="false">Author: WirelessAlien</string>
     <string name="zstd" translatable="false">ZSTD</string>
+    <string name="md5" translatable="false">MD5</string>
+    <string name="sha1" translatable="false">SHA-1</string>
+    <string name="sha256" translatable="false">SHA-256</string>
 </resources>
