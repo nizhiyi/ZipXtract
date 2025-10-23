@@ -89,7 +89,7 @@ dependencies {
     implementation 'net.lingala.zip4j:zip4j:2.11.5'
 
     //7-Zip-Jbinding-4Android
-    implementation 'com.github.omicronapps:7-Zip-JBinding-4Android:Release-16.02-2.02'
+    implementation 'com.github.omicronapps:7-Zip-JBinding-4Android:Release-16.02-2.03'
 
     //libarchive
     implementation 'me.zhanghai.android.libarchive:library:1.1.4'
