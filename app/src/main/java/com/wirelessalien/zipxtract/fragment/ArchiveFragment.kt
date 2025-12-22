@@ -35,6 +35,7 @@ import android.os.Looper
 import android.os.StatFs
 import android.provider.MediaStore
 import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuInflater
@@ -59,6 +60,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.chip.Chip
+import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.google.android.material.snackbar.Snackbar
@@ -68,6 +70,8 @@ import com.wirelessalien.zipxtract.R
 import com.wirelessalien.zipxtract.activity.SettingsActivity
 import com.wirelessalien.zipxtract.adapter.FileAdapter
 import com.wirelessalien.zipxtract.constant.BroadcastConstants
+import com.wirelessalien.zipxtract.constant.BroadcastConstants.PREFERENCE_EXTRACT_DIR_PATH
+import com.wirelessalien.zipxtract.constant.ServiceConstants.EXTRA_DESTINATION_PATH
 import com.wirelessalien.zipxtract.constant.ServiceConstants.EXTRA_JOB_ID
 import com.wirelessalien.zipxtract.constant.ServiceConstants.EXTRA_PASSWORD
 import com.wirelessalien.zipxtract.databinding.BottomSheetOptionBinding
@@ -87,6 +91,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
@@ -549,10 +554,67 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
         val bottomSheetDialog = BottomSheetDialog(requireContext())
         bottomSheetDialog.setContentView(binding.root)
 
-        checkStorageForExtraction(binding.lowStorageWarning, file.parent ?: Environment.getExternalStorageDirectory().absolutePath, file.length())
+        val buttons = listOf(
+            binding.btnExtract,
+            binding.btnMultiExtract,
+            binding.btnMulti7zExtract,
+            binding.btnMultiZipExtract
+        )
+
+        val defaultColor = binding.btnExtract.backgroundTintList
+
+        checkStorageForExtraction(
+            binding.lowStorageWarning,
+            file.parent ?: Environment.getExternalStorageDirectory().absolutePath,
+            file.length(),
+            buttons,
+            defaultColor
+        )
+
+        var storageCheckJob: Job? = null
+        binding.outputPathInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                storageCheckJob?.cancel()
+                storageCheckJob = lifecycleScope.launch {
+                    delay(1000)
+                    checkStorageForExtraction(
+                        binding.lowStorageWarning,
+                        s.toString(),
+                        file.length(),
+                        buttons,
+                        defaultColor
+                    )
+                }
+            }
+        })
 
         val filePath = file.absolutePath
         binding.fileName.text = file.name
+
+        val extractPath = sharedPreferences.getString(PREFERENCE_EXTRACT_DIR_PATH, null)
+        val defaultPath = if (!extractPath.isNullOrEmpty()) {
+            if (File(extractPath).isAbsolute) {
+                extractPath
+            } else {
+                File(Environment.getExternalStorageDirectory(), extractPath).absolutePath
+            }
+        } else {
+            file.parent ?: Environment.getExternalStorageDirectory().absolutePath
+        }
+
+        binding.outputPathInput.setText(defaultPath)
+
+        binding.outputPathLayout.setEndIconOnClickListener {
+            val pathPicker = PathPickerFragment.newInstance()
+            pathPicker.setPathPickerListener(object : PathPickerFragment.PathPickerListener {
+                override fun onPathSelected(path: String) {
+                    binding.outputPathInput.setText(path)
+                }
+            })
+            pathPicker.show(parentFragmentManager, "path_picker")
+        }
 
         binding.fileExtension.text = if (file.extension.isNotEmpty()) {
             if (file.extension.length > 4) {
@@ -582,14 +644,15 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
             val fileExtension = file.name.split('.').takeLast(2).joinToString(".").lowercase()
             val supportedExtensions =
                 listOf("tar.bz2", "tar.gz", "tar.lz4", "tar.lzma", "tar.sz", "tar.xz")
+            val destinationPath = binding.outputPathInput.text.toString()
 
             if (supportedExtensions.any { fileExtension.endsWith(it) }) {
-                startExtractionCsService(filePaths)
+                startExtractionCsService(filePaths, destinationPath)
             } else {
                 if (file.extension.lowercase() == "tar") {
-                    startExtractionService(filePaths, null)
+                    startExtractionService(filePaths, null, destinationPath)
                 } else {
-                    showPasswordInputDialog(filePaths)
+                    showPasswordInputDialog(filePaths, destinationPath)
                 }
             }
             bottomSheetDialog.dismiss()
@@ -610,17 +673,20 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
         }
 
         binding.btnMultiExtract.setOnClickListener {
-            showPasswordInputMultiRarDialog(filePath)
+            val destinationPath = binding.outputPathInput.text.toString()
+            showPasswordInputMultiRarDialog(filePath, destinationPath)
             bottomSheetDialog.dismiss()
         }
 
         binding.btnMulti7zExtract.setOnClickListener {
-            showPasswordInputMulti7zDialog(filePath)
+            val destinationPath = binding.outputPathInput.text.toString()
+            showPasswordInputMulti7zDialog(filePath, destinationPath)
             bottomSheetDialog.dismiss()
         }
 
         binding.btnMultiZipExtract.setOnClickListener {
-            showPasswordInputMultiZipDialog(filePath)
+            val destinationPath = binding.outputPathInput.text.toString()
+            showPasswordInputMultiZipDialog(filePath, destinationPath)
             bottomSheetDialog.dismiss()
         }
 
@@ -679,7 +745,7 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "text/plain"
     }
 
-    private fun showPasswordInputDialog(file: String) {
+    private fun showPasswordInputDialog(file: String, destinationPath: String?) {
         val binding = PasswordInputDialogBinding.inflate(layoutInflater)
 
         MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
@@ -687,15 +753,15 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
             .setView(binding.root)
             .setPositiveButton(getString(R.string.ok)) { _, _ ->
                 val password = binding.passwordInput.text.toString()
-                startExtractionService(file, password.ifBlank { null })
+                startExtractionService(file, password.ifBlank { null }, destinationPath)
             }
             .setNegativeButton(getString(R.string.no_password)) { _, _ ->
-                startExtractionService(file, null)
+                startExtractionService(file, null, destinationPath)
             }
             .show()
     }
 
-    private fun showPasswordInputMultiRarDialog(file: String) {
+    private fun showPasswordInputMultiRarDialog(file: String, destinationPath: String?) {
         val binding = PasswordInputDialogBinding.inflate(layoutInflater)
 
         MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
@@ -703,15 +769,15 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
             .setView(binding.root)
             .setPositiveButton(getString(R.string.ok)) { _, _ ->
                 val password = binding.passwordInput.text.toString()
-                startRarExtractionService(file, password.ifBlank { null })
+                startRarExtractionService(file, password.ifBlank { null }, destinationPath)
             }
             .setNegativeButton(getString(R.string.no_password)) { _, _ ->
-                startRarExtractionService(file, null)
+                startRarExtractionService(file, null, destinationPath)
             }
             .show()
     }
 
-    private fun showPasswordInputMulti7zDialog(file: String) {
+    private fun showPasswordInputMulti7zDialog(file: String, destinationPath: String?) {
         val binding = PasswordInputDialogBinding.inflate(layoutInflater)
 
         MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
@@ -719,15 +785,15 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
             .setView(binding.root)
             .setPositiveButton(getString(R.string.ok)) { _, _ ->
                 val password = binding.passwordInput.text.toString()
-                startMulti7zExtractionService(file, password.ifBlank { null })
+                startMulti7zExtractionService(file, password.ifBlank { null }, destinationPath)
             }
             .setNegativeButton(getString(R.string.no_password)) { _, _ ->
-                startMulti7zExtractionService(file, null)
+                startMulti7zExtractionService(file, null, destinationPath)
             }
             .show()
     }
 
-    private fun showPasswordInputMultiZipDialog(file: String) {
+    private fun showPasswordInputMultiZipDialog(file: String, destinationPath: String?) {
         val binding = PasswordInputDialogBinding.inflate(layoutInflater)
 
         MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
@@ -735,59 +801,64 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
             .setView(binding.root)
             .setPositiveButton(getString(R.string.ok)) { _, _ ->
                 val password = binding.passwordInput.text.toString()
-                startMultiZipExtractionService(file, password.ifBlank { null })
+                startMultiZipExtractionService(file, password.ifBlank { null }, destinationPath)
             }
             .setNegativeButton(getString(R.string.no_password)) { _, _ ->
-                startMultiZipExtractionService(file, null)
+                startMultiZipExtractionService(file, null, destinationPath)
             }
             .show()
     }
 
-    private fun startExtractionService(file: String, password: String?) {
+    private fun startExtractionService(file: String, password: String?, destinationPath: String?) {
         eProgressDialog.show()
         val jobId = fileOperationsDao.addFilesForJob(listOf(file))
         val intent = Intent(requireContext(), ExtractArchiveService::class.java).apply {
             putExtra(EXTRA_JOB_ID, jobId)
             putExtra(EXTRA_PASSWORD, password)
+            putExtra(EXTRA_DESTINATION_PATH, destinationPath)
         }
         ContextCompat.startForegroundService(requireContext(), intent)
     }
 
-    private fun startExtractionCsService(file: String) {
+    private fun startExtractionCsService(file: String, destinationPath: String?) {
         eProgressDialog.show()
         val jobId = fileOperationsDao.addFilesForJob(listOf(file))
         val intent = Intent(requireContext(), ExtractCsArchiveService::class.java).apply {
             putExtra(EXTRA_JOB_ID, jobId)
+            putExtra(EXTRA_DESTINATION_PATH, destinationPath)
         }
         ContextCompat.startForegroundService(requireContext(), intent)
     }
 
-    private fun startRarExtractionService(file: String, password: String?) {
+    private fun startRarExtractionService(file: String, password: String?, destinationPath: String?) {
         eProgressDialog.show()
         val jobId = fileOperationsDao.addFilesForJob(listOf(file))
         val intent = Intent(requireContext(), ExtractRarService::class.java).apply {
             putExtra(EXTRA_JOB_ID, jobId)
             putExtra(EXTRA_PASSWORD, password)
+            putExtra(EXTRA_DESTINATION_PATH, destinationPath)
         }
         ContextCompat.startForegroundService(requireContext(), intent)
     }
 
-    private fun startMulti7zExtractionService(file: String, password: String?) {
+    private fun startMulti7zExtractionService(file: String, password: String?, destinationPath: String?) {
         eProgressDialog.show()
         val jobId = fileOperationsDao.addFilesForJob(listOf(file))
         val intent = Intent(requireContext(), ExtractMultipart7zService::class.java).apply {
             putExtra(EXTRA_JOB_ID, jobId)
             putExtra(EXTRA_PASSWORD, password)
+            putExtra(EXTRA_DESTINATION_PATH, destinationPath)
         }
         ContextCompat.startForegroundService(requireContext(), intent)
     }
 
-    private fun startMultiZipExtractionService(file: String, password: String?) {
+    private fun startMultiZipExtractionService(file: String, password: String?, destinationPath: String?) {
         eProgressDialog.show()
         val jobId = fileOperationsDao.addFilesForJob(listOf(file))
         val intent = Intent(requireContext(), ExtractMultipartZipService::class.java).apply {
             putExtra(EXTRA_JOB_ID, jobId)
             putExtra(EXTRA_PASSWORD, password)
+            putExtra(EXTRA_DESTINATION_PATH, destinationPath)
         }
         ContextCompat.startForegroundService(requireContext(), intent)
     }
@@ -895,7 +966,13 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
         }
     }
 
-    private fun checkStorageForExtraction(warningTextView: TextView, path: String, requiredSize: Long) {
+    private fun checkStorageForExtraction(
+        warningTextView: TextView,
+        path: String,
+        requiredSize: Long,
+        buttons: List<View>? = null,
+        defaultColor: android.content.res.ColorStateList? = null
+    ) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val stat = StatFs(path)
@@ -909,10 +986,15 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
                     withContext(Dispatchers.Main) {
                         warningTextView.text = warningText
                         warningTextView.visibility = View.VISIBLE
+                        val errorColor = MaterialColors.getColor(warningTextView, com.google.android.material.R.attr.colorOnError)
+                        buttons?.forEach { it.backgroundTintList = android.content.res.ColorStateList.valueOf(errorColor) }
                     }
                 } else {
                     withContext(Dispatchers.Main) {
                         warningTextView.visibility = View.GONE
+                        if (defaultColor != null) {
+                            buttons?.forEach { it.backgroundTintList = defaultColor }
+                        }
                     }
                 }
             } catch (e: Exception) {

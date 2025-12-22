@@ -31,10 +31,9 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.chip.Chip
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.wirelessalien.zipxtract.R
 import com.wirelessalien.zipxtract.adapter.FilePickerAdapter
-import com.wirelessalien.zipxtract.databinding.DialogFilePickerBinding
+import com.wirelessalien.zipxtract.databinding.DialogPathPickerBinding
 import com.wirelessalien.zipxtract.helper.StorageHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +46,8 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.attribute.BasicFileAttributes
 
-class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItemClickListener, FilePickerAdapter.ActionModeProvider {
+class PathPickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItemClickListener,
+    FilePickerAdapter.ActionModeProvider {
 
     override var actionMode: ActionMode? = null
 
@@ -61,22 +61,21 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
     private var fileLoadingJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-
-    interface FilePickerListener {
-        fun onFilesSelected(files: List<File>)
+    interface PathPickerListener {
+        fun onPathSelected(path: String)
     }
 
-    private lateinit var binding: DialogFilePickerBinding
+    private lateinit var binding: DialogPathPickerBinding
     private lateinit var adapter: FilePickerAdapter
     private var currentPath: String = Environment.getExternalStorageDirectory().absolutePath
-    private var listener: FilePickerListener? = null
+    private var listener: PathPickerListener? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-        binding = DialogFilePickerBinding.inflate(inflater, container, false)
+        binding = DialogPathPickerBinding.inflate(inflater, container, false)
         return binding.root
     }
 
@@ -84,12 +83,16 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
         super.onViewCreated(view, savedInstanceState)
 
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(requireContext())
-        sortBy = SortBy.valueOf(sharedPreferences.getString("sortBy", SortBy.SORT_BY_NAME.name) ?: SortBy.SORT_BY_NAME.name)
+        sortBy = SortBy.valueOf(
+            sharedPreferences.getString("sortBy", SortBy.SORT_BY_NAME.name)
+                ?: SortBy.SORT_BY_NAME.name
+        )
         sortAscending = sharedPreferences.getBoolean("sortAscending", true)
 
         dialog?.setOnShowListener {
             val bottomSheetDialog = it as BottomSheetDialog
-            val bottomSheet = bottomSheetDialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
+            val bottomSheet =
+                bottomSheetDialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
             bottomSheet?.let { sheet ->
                 val behavior = BottomSheetBehavior.from(sheet)
                 sheet.layoutParams.height = ViewGroup.LayoutParams.MATCH_PARENT
@@ -98,6 +101,7 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
             }
         }
 
+        // We use FilePickerAdapter but will filter out files, showing only directories
         adapter = FilePickerAdapter(requireContext(), ArrayList())
         adapter.setOnItemClickListener(this)
         binding.recyclerView.layoutManager = LinearLayoutManager(requireContext())
@@ -110,25 +114,8 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
             dismiss()
         }
         binding.btnSelect.setOnClickListener {
-            val selectedFiles = adapter.getSelectedItems()
-            if (selectedFiles.isNotEmpty()) {
-                listener?.onFilesSelected(selectedFiles)
-            }
+            listener?.onPathSelected(currentPath)
             dismiss()
-        }
-        binding.btnAddFolder.setOnClickListener {
-            val folder = File(currentPath)
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(getString(R.string.add_folder_confirmation_title))
-                .setMessage(getString(R.string.add_folder_confirmation_message, folder.name))
-                .setNegativeButton(resources.getString(R.string.cancel)) { dialog, _ ->
-                    dialog.dismiss()
-                }
-                .setPositiveButton(resources.getString(R.string.add)) { _, _ ->
-                    listener?.onFilesSelected(listOf(folder))
-                    dismiss()
-                }
-                .show()
         }
 
         val sdCardPath = StorageHelper.getSdCardPath(requireContext())
@@ -147,16 +134,6 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
 
         loadFiles(currentPath)
         updateCurrentPathChip()
-        updateSelectedCount()
-    }
-
-    private fun updateSelectedCount() {
-        val selectedCount = adapter.getSelectedItems().size
-        if (selectedCount > 0) {
-            binding.btnSelect.text = getString(R.string.select_files, selectedCount)
-        } else {
-            binding.btnSelect.text = getString(R.string.add)
-        }
     }
 
     private fun updateCurrentPathChip() {
@@ -241,14 +218,11 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
                 val file = File(path)
                 val fileList = file.listFiles()?.toList() ?: emptyList()
 
-                val files = ArrayList<File>()
                 val directories = ArrayList<File>()
 
                 fileList.forEach { f ->
                     if (f.isDirectory) {
                         directories.add(f)
-                    } else {
-                        files.add(f)
                     }
                 }
 
@@ -256,39 +230,33 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
                 when (sortBy) {
                     SortBy.SORT_BY_NAME -> {
                         directories.sortBy { it.name }
-                        files.sortBy { it.name }
                     }
+
                     SortBy.SORT_BY_SIZE -> {
                         directories.sortBy { it.length() }
-                        files.sortBy { it.length() }
                     }
+
                     SortBy.SORT_BY_MODIFIED -> {
                         directories.sortBy { getFileTimeOfCreation(it) }
-                        files.sortBy { getFileTimeOfCreation(it) }
                     }
+
                     SortBy.SORT_BY_EXTENSION -> {
                         directories.sortBy { it.extension }
-                        files.sortBy { it.extension }
                     }
                 }
 
                 if (!sortAscending) {
                     directories.reverse()
-                    files.reverse()
                 }
 
-                val resultList = ArrayList<File>()
-                resultList.addAll(directories)
-                resultList.addAll(files)
-                resultList
+                directories
             }
 
-            val sdCardPath = StorageHelper.getSdCardPath(requireContext())
-            if (path == Environment.getExternalStorageDirectory().absolutePath || (sdCardPath != null && path == sdCardPath)) {
-                binding.btnAddFolder.visibility = View.GONE
-            } else {
-                binding.btnAddFolder.visibility = View.VISIBLE
-            }
+//            if (path == Environment.getExternalStorageDirectory().absolutePath) {
+//                binding.btnAddFolder.visibility = View.GONE
+//            } else {
+//                binding.btnAddFolder.visibility = View.VISIBLE
+//            }
 
             adapter.updateFilesAndFilter(combinedList)
 
@@ -307,8 +275,6 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
     override fun onItemClick(file: File, filePath: String) {
         if (file.isDirectory) {
             loadFiles(file.absolutePath)
-        } else {
-            toggleSelection(adapter.files.indexOf(file))
         }
     }
 
@@ -317,21 +283,20 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
     }
 
     override fun toggleSelection(position: Int) {
-        updateSelectedCount()
+        // Not needed
     }
 
     override fun getSelectedItemCount(): Int {
-        return adapter.getSelectedItems().size
+        return 0
     }
 
-
-    fun setFilePickerListener(listener: FilePickerListener) {
+    fun setPathPickerListener(listener: PathPickerListener) {
         this.listener = listener
     }
 
     companion object {
-        fun newInstance(): FilePickerFragment {
-            return FilePickerFragment()
+        fun newInstance(): PathPickerFragment {
+            return PathPickerFragment()
         }
     }
 }

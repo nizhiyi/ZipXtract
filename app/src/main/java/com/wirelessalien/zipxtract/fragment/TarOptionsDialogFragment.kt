@@ -21,6 +21,8 @@ import android.app.Dialog
 import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -30,14 +32,19 @@ import android.widget.Toast
 import androidx.core.view.isGone
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.lifecycleScope
+import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.color.MaterialColors
 import com.wirelessalien.zipxtract.R
 import com.wirelessalien.zipxtract.adapter.FileAdapter
 import com.wirelessalien.zipxtract.adapter.FilePathAdapter
+import com.wirelessalien.zipxtract.constant.BroadcastConstants.PREFERENCE_ARCHIVE_DIR_PATH
 import com.wirelessalien.zipxtract.databinding.TarOptionDialogBinding
 import com.wirelessalien.zipxtract.helper.FileOperationsDao
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -106,7 +113,13 @@ class TarOptionsDialogFragment : DialogFragment() {
         }
     }
 
-    private fun checkStorageForArchive(warningTextView: TextView, path: String, requiredSize: Long) {
+    private fun checkStorageForArchive(
+        warningTextView: TextView,
+        path: String,
+        requiredSize: Long,
+        okButton: View? = null,
+        defaultColor: android.content.res.ColorStateList? = null
+    ) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val stat = StatFs(path)
@@ -114,16 +127,29 @@ class TarOptionsDialogFragment : DialogFragment() {
                 val safeRequiredSize = (requiredSize * 1.1).toLong()
 
                 if (availableSize < safeRequiredSize) {
-                    val availableSizeStr = android.text.format.Formatter.formatFileSize(requireContext(), availableSize)
-                    val requiredSizeStr = android.text.format.Formatter.formatFileSize(requireContext(), requiredSize)
-                    val warningText = getString(R.string.low_storage_warning_dynamic, availableSizeStr, requiredSizeStr)
+                    val availableSizeStr = android.text.format.Formatter.formatFileSize(
+                        requireContext(),
+                        availableSize
+                    )
+                    val requiredSizeStr =
+                        android.text.format.Formatter.formatFileSize(requireContext(), requiredSize)
+                    val warningText = getString(
+                        R.string.low_storage_warning_dynamic,
+                        availableSizeStr,
+                        requiredSizeStr
+                    )
                     withContext(Dispatchers.Main) {
                         warningTextView.text = warningText
                         warningTextView.visibility = View.VISIBLE
+                        val errorColor = MaterialColors.getColor(warningTextView, com.google.android.material.R.attr.colorOnError)
+                        okButton?.backgroundTintList = android.content.res.ColorStateList.valueOf(errorColor)
                     }
                 } else {
                     withContext(Dispatchers.Main) {
                         warningTextView.visibility = View.GONE
+                        if (defaultColor != null) {
+                            okButton?.backgroundTintList = defaultColor
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -190,21 +216,68 @@ class TarOptionsDialogFragment : DialogFragment() {
         }
 
         // Check storage
-        val targetPath = if (selectedFilePaths.isNotEmpty()) {
-            File(selectedFilePaths.first()).parent ?: Environment.getExternalStorageDirectory().absolutePath
+        val parentPath = if (selectedFilePaths.isNotEmpty()) {
+            File(selectedFilePaths.first()).parent
+                ?: Environment.getExternalStorageDirectory().absolutePath
         } else {
             Environment.getExternalStorageDirectory().absolutePath
         }
+
+        val defaultColor = binding.okButton.backgroundTintList
+        var totalSize = 0L
+
         lifecycleScope.launch {
-            val totalSize = withContext(Dispatchers.IO) {
+            totalSize = withContext(Dispatchers.IO) {
                 selectedFilePaths.sumOf { File(it).length() }
             }
-            checkStorageForArchive(binding.lowStorageWarning, targetPath, totalSize)
+            checkStorageForArchive(binding.lowStorageWarning, parentPath, totalSize, binding.okButton, defaultColor)
         }
+
+        var storageCheckJob: Job? = null
+        binding.outputPathInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                storageCheckJob?.cancel()
+                storageCheckJob = lifecycleScope.launch {
+                    delay(1000)
+                    checkStorageForArchive(
+                        binding.lowStorageWarning,
+                        s.toString(),
+                        totalSize,
+                        binding.okButton,
+                        defaultColor
+                    )
+                }
+            }
+        })
 
         binding.archiveNameEditText.setText(defaultName)
         binding.archiveNameEditText.setOnClickListener {
             binding.archiveNameEditText.selectAll()
+        }
+
+        val sharedPreferences = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val archivePath = sharedPreferences.getString(PREFERENCE_ARCHIVE_DIR_PATH, null)
+        val defaultPath = if (!archivePath.isNullOrEmpty()) {
+            if (File(archivePath).isAbsolute) {
+                archivePath
+            } else {
+                File(Environment.getExternalStorageDirectory(), archivePath).absolutePath
+            }
+        } else {
+            parentPath
+        }
+
+        binding.outputPathInput.setText(defaultPath)
+        binding.outputPathLayout.setEndIconOnClickListener {
+            val pathPicker = PathPickerFragment.newInstance()
+            pathPicker.setPathPickerListener(object : PathPickerFragment.PathPickerListener {
+                override fun onPathSelected(path: String) {
+                    binding.outputPathInput.setText(path)
+                }
+            })
+            pathPicker.show(parentFragmentManager, "path_picker")
         }
 
         binding.compressionChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
@@ -221,13 +294,15 @@ class TarOptionsDialogFragment : DialogFragment() {
 
         binding.okButton.setOnClickListener {
             val archiveName = binding.archiveNameEditText.text.toString().ifBlank { defaultName }
+            val destinationPath = binding.outputPathInput.text.toString()
 
             val mainFragment =
                 parentFragmentManager.findFragmentById(R.id.container) as? MainFragment
             mainFragment?.startArchiveTarService(
                 selectedFilePaths,
                 archiveName,
-                selectedCompressionFormat
+                selectedCompressionFormat,
+                destinationPath
             )
             dismiss()
         }

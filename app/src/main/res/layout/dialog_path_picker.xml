@@ -38,7 +38,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/select_file"
+                android:text="@string/select_directory"
                 android:layout_centerVertical="true"
                 android:textAppearance="@style/TextAppearance.Material3.TitleLarge"/>
 
@@ -162,7 +162,7 @@
                 android:layout_height="wrap_content"
                 android:layout_centerVertical="true"
                 android:layout_toEndOf="@id/btnCancel"
-                android:text="@string/add"
+                android:text="@string/select"
                 app:cornerRadius="10dp" />
 
             <com.google.android.material.button.MaterialButton
