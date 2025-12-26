@@ -81,6 +81,7 @@ import com.wirelessalien.zipxtract.databinding.PasswordInputDialogBinding
 import com.wirelessalien.zipxtract.databinding.ProgressDialogExtractBinding
 import com.wirelessalien.zipxtract.helper.ChecksumUtils
 import com.wirelessalien.zipxtract.helper.FileOperationsDao
+import com.wirelessalien.zipxtract.model.FileItem
 import com.wirelessalien.zipxtract.service.DeleteFilesService
 import com.wirelessalien.zipxtract.service.ExtractArchiveService
 import com.wirelessalien.zipxtract.service.ExtractCsArchiveService
@@ -403,13 +404,13 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
         }
     }
 
-    private fun searchAllFiles(query: String?): Flow<List<File>> = flow {
+    private fun searchAllFiles(query: String?): Flow<List<FileItem>> = flow {
         val results = getArchiveFiles(query, null)
         emit(results)
     }
 
-    private fun getArchiveFiles(query: String? = null, extension: String? = null): ArrayList<File> {
-        val archiveFiles = ArrayList<File>()
+    private fun getArchiveFiles(query: String? = null, extension: String? = null): ArrayList<FileItem> {
+        val archiveFiles = ArrayList<FileItem>()
         val uri = MediaStore.Files.getContentUri("external")
         val projection = arrayOf(
             MediaStore.Files.FileColumns.DATA,
@@ -460,7 +461,7 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
                     if (path != null) {
                         val file = File(path)
                         if (file.isFile && archiveExtensions.contains(file.extension.lowercase())) {
-                            archiveFiles.add(file)
+                            archiveFiles.add(FileItem.fromFile(file))
                         }
                     }
                 }
@@ -471,9 +472,9 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
 
         if (sortBy == SortBy.SORT_BY_EXTENSION) {
             if (sortAscending) {
-                archiveFiles.sortBy { it.extension }
+                archiveFiles.sortBy { it.file.extension }
             } else {
-                archiveFiles.sortByDescending { it.extension }
+                archiveFiles.sortByDescending { it.file.extension }
             }
         }
 
@@ -545,6 +546,11 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
     }
 
     override fun onItemClick(file: File, filePath: String) {
+        if (!file.exists()) {
+            Toast.makeText(requireContext(), getString(R.string.file_does_not_exist), Toast.LENGTH_SHORT).show()
+            updateAdapterWithFullList()
+            return
+        }
         showBottomSheetOptions(filePath, file)
     }
 
@@ -651,11 +657,31 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
             } else {
                 if (file.extension.lowercase() == "tar") {
                     startExtractionService(filePaths, null, destinationPath)
+                    bottomSheetDialog.dismiss()
+                } else if (file.extension.equals("zip", ignoreCase = true)) {
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        var isEncrypted = true
+                        try {
+                            net.lingala.zip4j.ZipFile(file).use { zipFile ->
+                                isEncrypted = zipFile.isEncrypted
+                            }
+                        } catch (e: Exception) {
+                            // isEncrypted remains true
+                        }
+                        withContext(Dispatchers.Main) {
+                            if (isEncrypted) {
+                                showPasswordInputDialog(filePaths, destinationPath)
+                            } else {
+                                startExtractionService(filePaths, null, destinationPath)
+                            }
+                            bottomSheetDialog.dismiss()
+                        }
+                    }
                 } else {
                     showPasswordInputDialog(filePaths, destinationPath)
+                    bottomSheetDialog.dismiss()
                 }
             }
-            bottomSheetDialog.dismiss()
         }
 
         val previewExtensions = listOf("7z", "zip")
@@ -724,7 +750,7 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
                     }
                     ContextCompat.startForegroundService(requireContext(), intent)
 
-                    val position = adapter.files.indexOf(file)
+                    val position = adapter.files.indexOfFirst { it.file == file }
                     if (position != -1) {
                         adapter.removeItem(position)
                     }

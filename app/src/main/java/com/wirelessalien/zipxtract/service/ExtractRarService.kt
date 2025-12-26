@@ -126,6 +126,7 @@ class ExtractRarService : Service() {
         extractionJob = CoroutineScope(Dispatchers.IO).launch {
             extractArchive(modifiedFilePath, useAppNameDir, destinationPath)
             fileOperationsDao.deleteFilesForJob(jobId)
+            stopSelf()
         }
 
         return START_NOT_STICKY
@@ -274,13 +275,19 @@ class ExtractRarService : Service() {
                     val extractCallback = ExtractCallback(inArchive, destinationDir)
                     inArchive.extract(null, false, extractCallback)
 
-                    FileUtils.setLastModifiedTime(extractCallback.directories)
-                    scanForNewFiles(destinationDir)
-                    showCompletionNotification(destinationDir.path)
-                    sendLocalBroadcast(Intent(ACTION_EXTRACTION_COMPLETE).putExtra(EXTRA_DIR_PATH, destinationDir.path))
+                    if (extractCallback.hasError) {
+                        // Error already handled in callback
+                    } else {
+                        FileUtils.setLastModifiedTime(extractCallback.directories)
+                        scanForNewFiles(destinationDir)
+                        showCompletionNotification(destinationDir.path)
+                        sendLocalBroadcast(Intent(ACTION_EXTRACTION_COMPLETE).putExtra(EXTRA_DIR_PATH, destinationDir.path))
+                    }
                 } catch (e: SevenZipException) {
                     if (e.message == "Cancelled") {
                         // Cancelled by user, do nothing
+                    } else if (e.message == "WrongPasswordDetected") {
+                        // Error already handled in callback
                     } else {
                         e.printStackTrace()
                         showErrorNotification(e.message ?: getString(R.string.general_error_msg))
@@ -313,6 +320,7 @@ class ExtractRarService : Service() {
         private var currentFileIndex: Int = -1
         private var currentUnpackedFile: File? = null
         val directories = mutableListOf<DirectoryInfo>()
+        var hasError = false
 
         init {
             totalSize = inArchive.numberOfItems.toLong()
@@ -323,6 +331,7 @@ class ExtractRarService : Service() {
         override fun setOperationResult(p0: ExtractOperationResult?) {
             when (p0) {
                 ExtractOperationResult.WRONG_PASSWORD -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.wrong_password))
                         sendLocalBroadcast(
@@ -333,8 +342,10 @@ class ExtractRarService : Service() {
                         )
                         errorBroadcasted = true
                     }
+                    throw SevenZipException("WrongPasswordDetected")
                 }
                 ExtractOperationResult.DATAERROR, ExtractOperationResult.UNSUPPORTEDMETHOD, ExtractOperationResult.CRCERROR, ExtractOperationResult.UNAVAILABLE, ExtractOperationResult.HEADERS_ERROR, ExtractOperationResult.UNEXPECTED_END, ExtractOperationResult.UNKNOWN_OPERATION_RESULT -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.general_error_msg))
                         sendLocalBroadcast(
@@ -367,6 +378,7 @@ class ExtractRarService : Service() {
                     }
                 }
                 else -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.general_error_msg))
                         sendLocalBroadcast(
@@ -424,8 +436,8 @@ class ExtractRarService : Service() {
             if (extractionJob?.isActive == false) {
                 throw SevenZipException("Cancelled")
             }
+            if (hasError) return
             val progress = ((complete.toDouble() / totalSize) * 100).toInt()
-            startForeground(NOTIFICATION_ID, createNotification(progress))
             updateProgress(progress)
         }
 

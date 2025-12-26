@@ -30,6 +30,7 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.chip.Chip
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.wirelessalien.zipxtract.R
@@ -38,10 +39,10 @@ import com.wirelessalien.zipxtract.databinding.DialogArchiveTypeBinding
 import com.wirelessalien.zipxtract.databinding.DialogCrashLogBinding
 import com.wirelessalien.zipxtract.databinding.PasswordInputOpenWithBinding
 import com.wirelessalien.zipxtract.helper.FileOperationsDao
+import com.wirelessalien.zipxtract.helper.FileUtils
 import com.wirelessalien.zipxtract.service.ExtractArchiveService
 import com.wirelessalien.zipxtract.service.ExtractCsArchiveService
 import com.wirelessalien.zipxtract.service.ExtractRarService
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -137,10 +138,54 @@ class OpenWithActivity : AppCompatActivity() {
     private fun handleViewIntent() {
         val uri = intent?.data
         if (uri != null) {
-            showPasswordInputDialog(uri)
+            processFileAndCheckEncryption(uri)
         } else {
             Toast.makeText(this, getString(R.string.no_file_selected), Toast.LENGTH_SHORT).show()
             finish()
+        }
+    }
+
+    private fun processFileAndCheckEncryption(uri: Uri) {
+        val progressDialog = MaterialAlertDialogBuilder(this, R.style.MaterialDialog)
+            .setTitle(getString(R.string.copying_files))
+            .setView(R.layout.dialog_progress)
+            .setCancelable(false)
+            .show()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val filePath = getRealPathFromURI(uri, this@OpenWithActivity)
+
+            var isEncrypted = true
+            var isZip = false
+
+            if (filePath != null) {
+                val file = File(filePath)
+                if (file.extension.equals("zip", ignoreCase = true)) {
+                    isZip = true
+                    try {
+                        net.lingala.zip4j.ZipFile(file).use { zipFile ->
+                            isEncrypted = zipFile.isEncrypted
+                        }
+                    } catch (e: Exception) {
+                        // isEncrypted remains true
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                progressDialog.dismiss()
+                if (filePath != null) {
+                    if (isZip && !isEncrypted) {
+                        handleFileExtraction(filePath, null)
+                        finish()
+                    } else {
+                        showPasswordInputDialog(filePath)
+                    }
+                } else {
+                    Toast.makeText(this@OpenWithActivity, getString(R.string.no_file_selected), Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+            }
         }
     }
 
@@ -151,7 +196,7 @@ class OpenWithActivity : AppCompatActivity() {
             .setCancelable(false)
             .show()
 
-        CoroutineScope(Dispatchers.IO).launch {
+        lifecycleScope.launch(Dispatchers.IO) {
             val filePath = getRealPathFromURI(uri, this@OpenWithActivity)
             withContext(Dispatchers.Main) {
                 progressDialog.dismiss()
@@ -172,7 +217,7 @@ class OpenWithActivity : AppCompatActivity() {
             .setCancelable(false)
             .show()
 
-        CoroutineScope(Dispatchers.IO).launch {
+        lifecycleScope.launch(Dispatchers.IO) {
             val filePaths = getRealPathsFromURIs(uris, this@OpenWithActivity)
             withContext(Dispatchers.Main) {
                 progressDialog.dismiss()
@@ -234,42 +279,19 @@ class OpenWithActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showPasswordInputDialog(uri: Uri) {
+    private fun showPasswordInputDialog(filePath: String) {
         val dialogBinding = PasswordInputOpenWithBinding.inflate(layoutInflater)
         val passwordEditText = dialogBinding.passwordInput
-        val progressBar = dialogBinding.progressIndicator
 
         MaterialAlertDialogBuilder(this, R.style.MaterialDialog)
             .setTitle(getString(R.string.enter_password))
             .setView(dialogBinding.root)
             .setPositiveButton(getString(R.string.ok)) { _, _ ->
                 val password = passwordEditText.text.toString()
-                progressBar.visibility = View.VISIBLE
-                CoroutineScope(Dispatchers.IO).launch {
-                    val filePath = getRealPathFromURI(uri, this@OpenWithActivity)
-                    withContext(Dispatchers.Main) {
-                        progressBar.visibility = View.GONE
-                        if (filePath != null) {
-                            handleFileExtraction(filePath, password)
-                        } else {
-                            Log.i("OpenWithActivity", "Failed to get file path")
-                        }
-                    }
-                }
+                handleFileExtraction(filePath, password)
             }
             .setNegativeButton(getString(R.string.no_password)) { _, _ ->
-                progressBar.visibility = View.VISIBLE
-                CoroutineScope(Dispatchers.IO).launch {
-                    val filePath = getRealPathFromURI(uri, this@OpenWithActivity)
-                    withContext(Dispatchers.Main) {
-                        progressBar.visibility = View.GONE
-                        if (filePath != null) {
-                            handleFileExtraction(filePath, null)
-                        } else {
-                            Log.i("OpenWithActivity", "Failed to get file path")
-                        }
-                    }
-                }
+                handleFileExtraction(filePath, null)
             }
             .setOnDismissListener {
                 finish()
@@ -298,28 +320,19 @@ class OpenWithActivity : AppCompatActivity() {
         val returnCursor = context.contentResolver.query(uri, null, null, null, null)
         returnCursor?.use {
             val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            val sizeIndex = it.getColumnIndex(OpenableColumns.SIZE)
             it.moveToFirst()
             val name = it.getString(nameIndex)
-            it.getLong(sizeIndex).toString()
             val file = File(context.filesDir, name)
             try {
                 val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-                val outputStream = FileOutputStream(file)
-                var read = 0
-                val maxBufferSize = 1 * 1024 * 1024
-                val bytesAvailable: Int = inputStream?.available() ?: 0
-                val bufferSize = bytesAvailable.coerceAtMost(maxBufferSize)
-                val buffers = ByteArray(bufferSize)
-                while (inputStream?.read(buffers).also { it1 ->
-                        if (it1 != null) {
-                            read = it1
+                if (inputStream != null) {
+                    val outputStream = FileOutputStream(file)
+                    inputStream.use { input ->
+                        outputStream.use { output ->
+                            FileUtils.copyStream(input, output)
                         }
-                    } != -1) {
-                    outputStream.write(buffers, 0, read)
+                    }
                 }
-                inputStream?.close()
-                outputStream.close()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -343,13 +356,11 @@ class OpenWithActivity : AppCompatActivity() {
                     val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
                     if (inputStream != null) {
                         val outputStream = FileOutputStream(file)
-                        var read: Int
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        while (inputStream.read(buffer).also { read = it } != -1) {
-                            outputStream.write(buffer, 0, read)
+                        inputStream.use { input ->
+                            outputStream.use { output ->
+                                FileUtils.copyStream(input, output)
+                            }
                         }
-                        inputStream.close()
-                        outputStream.close()
                         copiedPaths.add(file.path)
                     } else {
                         Log.e("OpenWithActivity", "Failed to open input stream for URI: $uri")

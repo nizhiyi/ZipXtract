@@ -126,6 +126,7 @@ class ExtractMultipart7zService : Service() {
         extractionJob = CoroutineScope(Dispatchers.IO).launch {
             extractArchive(modifiedFilePath, destinationPath)
             fileOperationsDao.deleteFilesForJob(jobId)
+            stopSelf()
         }
 
         return START_NOT_STICKY
@@ -230,7 +231,7 @@ class ExtractMultipart7zService : Service() {
             counter++
         }
 
-        destinationDir.mkdir()
+        destinationDir.mkdirs()
         try {
             val archiveOpenVolumeCallback = ArchiveOpenMultipart7zCallback(inputDir)
             val inStream: IInStream = VolumedArchiveInStream(file.name, archiveOpenVolumeCallback)
@@ -240,13 +241,19 @@ class ExtractMultipart7zService : Service() {
                 val extractCallback = ExtractCallback(inArchive, destinationDir)
                 inArchive.extract(null, false, extractCallback)
 
-                FileUtils.setLastModifiedTime(extractCallback.directories)
-                scanForNewFiles(destinationDir)
-                showCompletionNotification(destinationDir.path)
-                sendLocalBroadcast(Intent(ACTION_EXTRACTION_COMPLETE).putExtra(EXTRA_DIR_PATH, destinationDir.path))
+                if (extractCallback.hasError) {
+                    // Error already handled
+                } else {
+                    FileUtils.setLastModifiedTime(extractCallback.directories)
+                    scanForNewFiles(destinationDir)
+                    showCompletionNotification(destinationDir.path)
+                    sendLocalBroadcast(Intent(ACTION_EXTRACTION_COMPLETE).putExtra(EXTRA_DIR_PATH, destinationDir.path))
+                }
             } catch (e: SevenZipException) {
                 if (e.message == "Cancelled") {
                     // Cancelled by user, do nothing
+                } else if (e.message == "WrongPasswordDetected") {
+                    // Error already handled in callback
                 } else {
                     e.printStackTrace()
                     showErrorNotification(e.message ?: getString(R.string.general_error_msg))
@@ -276,6 +283,7 @@ class ExtractMultipart7zService : Service() {
         private var currentUnpackedFile: File? = null
         val directories = mutableListOf<DirectoryInfo>()
         private var lastProgress = -1
+        var hasError = false
 
         init {
             totalSize = inArchive.numberOfItems.toLong()
@@ -286,6 +294,7 @@ class ExtractMultipart7zService : Service() {
         override fun setOperationResult(p0: ExtractOperationResult?) {
             when (p0) {
                 ExtractOperationResult.WRONG_PASSWORD -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.wrong_password))
                         sendLocalBroadcast(
@@ -296,8 +305,10 @@ class ExtractMultipart7zService : Service() {
                         )
                         errorBroadcasted = true
                     }
+                    throw SevenZipException("WrongPasswordDetected")
                 }
                 ExtractOperationResult.DATAERROR, ExtractOperationResult.UNSUPPORTEDMETHOD, ExtractOperationResult.CRCERROR, ExtractOperationResult.UNAVAILABLE, ExtractOperationResult.HEADERS_ERROR, ExtractOperationResult.UNEXPECTED_END, ExtractOperationResult.UNKNOWN_OPERATION_RESULT -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.general_error_msg))
                         sendLocalBroadcast(
@@ -330,6 +341,7 @@ class ExtractMultipart7zService : Service() {
                     }
                 }
                 else -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.general_error_msg))
                         sendLocalBroadcast(
@@ -387,10 +399,10 @@ class ExtractMultipart7zService : Service() {
             if (extractionJob?.isActive == false) {
                 throw SevenZipException("Cancelled")
             }
+            if (hasError) return
             val progress = ((complete.toDouble() / totalSize) * 100).toInt()
             if (progress != lastProgress) {
                 lastProgress = progress
-                startForeground(NOTIFICATION_ID, createNotification(progress))
                 updateProgress(progress)
             }
         }

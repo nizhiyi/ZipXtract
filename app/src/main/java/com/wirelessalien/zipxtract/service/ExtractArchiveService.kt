@@ -147,6 +147,7 @@ class ExtractArchiveService : Service() {
         extractionJob = CoroutineScope(Dispatchers.IO).launch {
             extractArchive(filePath, password, useAppNameDir, destinationPath)
             fileOperationsDao.deleteFilesForJob(jobId)
+            stopSelf()
         }
 
         return START_NOT_STICKY
@@ -259,13 +260,15 @@ class ExtractArchiveService : Service() {
 
             try {
                 val inArchive = SevenZip.openInArchive(archiveFormat, inStream, OpenCallback(password))
-                destinationDir.mkdir()
+                destinationDir.mkdirs()
 
                 try {
                     val extractCallback = ExtractCallback(inArchive, destinationDir, password)
                     inArchive.extract(null, false, extractCallback)
 
-                    if (extractCallback.hasUnsupportedMethod) {
+                    if (extractCallback.hasError) {
+                        // Error already handled in callback
+                    } else if (extractCallback.hasUnsupportedMethod) {
                         tryLibArchiveAndroid(file, destinationDir)
                     } else {
                         FileUtils.setLastModifiedTime(extractCallback.directories)
@@ -276,6 +279,8 @@ class ExtractArchiveService : Service() {
                 } catch (e: SevenZipException) {
                     if (e.message == "Cancelled") {
                         // Cancelled by user, do nothing
+                    } else if (e.message == "WrongPasswordDetected") {
+                        // Error already handled in callback
                     } else {
                         e.printStackTrace()
                         showErrorNotification(e.message ?: getString(R.string.general_error_msg))
@@ -628,15 +633,14 @@ class ExtractArchiveService : Service() {
             while (!progressMonitor!!.state.equals(ProgressMonitor.State.READY)) {
                 if (progressMonitor!!.state.equals(ProgressMonitor.State.BUSY)) {
                     val percentDone = (progressMonitor!!.percentDone)
-                    startForeground(NOTIFICATION_ID, createNotification(percentDone))
-                    sendLocalBroadcast(Intent(ACTION_EXTRACTION_PROGRESS).putExtra(EXTRA_PROGRESS, percentDone))
+                    updateProgress(percentDone)
                 }
                 Thread.sleep(100)
             }
 
             if (progressMonitor!!.result == ProgressMonitor.Result.CANCELLED) {
                 // Do nothing
-            } else {
+            } else if (progressMonitor!!.result == ProgressMonitor.Result.SUCCESS) {
                 FileUtils.setLastModifiedTime(directories)
                 scanForNewFiles(destinationDir)
                 showCompletionNotification(destinationDir.absolutePath)
@@ -645,6 +649,15 @@ class ExtractArchiveService : Service() {
                 if (useAppNameDir) {
                     filesDir.deleteRecursively()
                 }
+            } else {
+                val exception = progressMonitor!!.exception
+                val errorMessage = if (exception is ZipException && exception.type == ZipException.Type.WRONG_PASSWORD) {
+                    getString(R.string.wrong_password)
+                } else {
+                    exception?.message ?: getString(R.string.general_error_msg)
+                }
+                showErrorNotification(errorMessage)
+                sendLocalBroadcast(Intent(ACTION_EXTRACTION_ERROR).putExtra(EXTRA_ERROR_MESSAGE, errorMessage))
             }
 
         } catch (e: ZipException) {
@@ -682,6 +695,7 @@ class ExtractArchiveService : Service() {
         private var currentFileIndex: Int = -1
         private var currentUnpackedFile: File? = null
         var hasUnsupportedMethod = false
+        var hasError = false
         val directories = mutableListOf<DirectoryInfo>()
 
         init {
@@ -696,6 +710,7 @@ class ExtractArchiveService : Service() {
                     hasUnsupportedMethod = true
                 }
                 ExtractOperationResult.WRONG_PASSWORD -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.wrong_password))
                         sendLocalBroadcast(
@@ -706,8 +721,10 @@ class ExtractArchiveService : Service() {
                         )
                         errorBroadcasted = true
                     }
+                    throw SevenZipException("WrongPasswordDetected")
                 }
                 ExtractOperationResult.DATAERROR, ExtractOperationResult.CRCERROR, ExtractOperationResult.UNAVAILABLE, ExtractOperationResult.HEADERS_ERROR, ExtractOperationResult.UNEXPECTED_END, ExtractOperationResult.UNKNOWN_OPERATION_RESULT -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.general_error_msg))
                         sendLocalBroadcast(
@@ -741,6 +758,7 @@ class ExtractArchiveService : Service() {
                     }
                 }
                 else -> {
+                    hasError = true
                     if (!errorBroadcasted) {
                         showErrorNotification(getString(R.string.general_error_msg))
                         sendLocalBroadcast(
@@ -763,7 +781,7 @@ class ExtractArchiveService : Service() {
             this.currentUnpackedFile = File(dstDir.path, path) // Store current unpacked file
 
             if (isDir) {
-                this.currentUnpackedFile!!.mkdir()
+                this.currentUnpackedFile!!.mkdirs()
                 val lastModified =
                     (inArchive.getProperty(p0, PropID.LAST_MODIFICATION_TIME) as? Date)?.time
                         ?: System.currentTimeMillis()
@@ -799,8 +817,8 @@ class ExtractArchiveService : Service() {
             if (extractionJob?.isActive == false) {
                 throw SevenZipException("Cancelled")
             }
+            if (hasError) return
             val progress = ((complete.toDouble() / totalSize) * 100).toInt()
-            startForeground(NOTIFICATION_ID, createNotification(progress))
             updateProgress(progress)
         }
 
