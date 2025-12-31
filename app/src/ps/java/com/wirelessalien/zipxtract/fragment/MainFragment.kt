@@ -112,6 +112,7 @@ import com.wirelessalien.zipxtract.databinding.ProgressDialogArchiveBinding
 import com.wirelessalien.zipxtract.databinding.ProgressDialogExtractBinding
 import com.wirelessalien.zipxtract.helper.ChecksumUtils
 import com.wirelessalien.zipxtract.helper.FileOperationsDao
+import com.wirelessalien.zipxtract.helper.MultipartArchiveHelper
 import com.wirelessalien.zipxtract.helper.StorageHelper
 import com.wirelessalien.zipxtract.service.Archive7zService
 import com.wirelessalien.zipxtract.service.ArchiveSplitZipService
@@ -1271,7 +1272,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         val bottomSheetDialog = BottomSheetDialog(requireContext())
         bottomSheetDialog.setContentView(binding.root)
 
-        val buttons = listOf(
+        val buttons: List<View> = listOf(
             binding.btnLzma,
             binding.btnBzip2,
             binding.btnXz,
@@ -1280,14 +1281,15 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
             binding.btnExtract
         )
 
-        val defaultColor = binding.btnExtract.backgroundTintList
+        val defaultColors = buttons.associateWith { view ->
+            if (view is Chip) view.chipBackgroundColor else view.backgroundTintList
+        }
 
         checkStorageForOperation(
             binding.lowStorageWarning,
             file.parent ?: Environment.getExternalStorageDirectory().absolutePath,
             file.length(),
-            buttons,
-            defaultColor
+            defaultColors
         )
 
         var storageCheckJob: Job? = null
@@ -1302,8 +1304,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                         binding.lowStorageWarning,
                         s.toString(),
                         file.length(),
-                        buttons,
-                        defaultColor
+                        defaultColors
                     )
                 }
             }
@@ -1459,21 +1460,15 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         val bottomSheetDialog = BottomSheetDialog(requireContext())
         bottomSheetDialog.setContentView(binding.root)
 
-        val buttons = listOf(
-            binding.btnExtract,
-            binding.btnMultiExtract,
-            binding.btnMulti7zExtract,
-            binding.btnMultiZipExtract
-        )
+        val buttons: List<View> = listOf(binding.btnExtract)
 
-        val defaultColor = binding.btnExtract.backgroundTintList
+        val defaultColors = buttons.associateWith { it.backgroundTintList }
 
         checkStorageForOperation(
             binding.lowStorageWarning,
             file.parent ?: Environment.getExternalStorageDirectory().absolutePath,
             file.length(),
-            buttons,
-            defaultColor
+            defaultColors
         )
 
         var storageCheckJob: Job? = null
@@ -1488,8 +1483,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                         binding.lowStorageWarning,
                         s.toString(),
                         file.length(),
-                        buttons,
-                        defaultColor
+                        defaultColors
                     )
                 }
             }
@@ -1559,20 +1553,32 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                 } else {
                     loadingDialog.show()
                     lifecycleScope.launch(Dispatchers.IO) {
+                        val isMultipartZip = MultipartArchiveHelper.isMultipartZip(file)
+                        val isMultipart7z = MultipartArchiveHelper.isMultipart7z(file)
+                        val isMultipartRar = MultipartArchiveHelper.isMultipartRar(file)
+
                         val isEncrypted = EncryptionCheckHelper.isEncrypted(file)
                         withContext(Dispatchers.Main) {
                             loadingDialog.dismiss()
-                            if (isEncrypted) {
-                                if (file.extension.equals("rar", ignoreCase = true)) {
-                                    showPasswordInputMultiRarDialog(filePaths, destinationPath)
-                                } else {
-                                    showPasswordInputDialog(filePaths, destinationPath)
-                                }
+                            if (isMultipartZip) {
+                                if (isEncrypted) showPasswordInputMultiZipDialog(filePaths, destinationPath)
+                                else startMultiZipExtractionService(filePaths, null, destinationPath)
+                            } else if (isMultipart7z) {
+                                if (isEncrypted) showPasswordInputMulti7zDialog(filePaths, destinationPath)
+                                else startMulti7zExtractionService(filePaths, null, destinationPath)
+                            } else if (isMultipartRar) {
+                                if (isEncrypted) showPasswordInputMultiRarDialog(filePaths, destinationPath)
+                                else startRarExtractionService(filePaths, null, destinationPath)
                             } else {
                                 if (file.extension.equals("rar", ignoreCase = true)) {
-                                    startRarExtractionService(filePaths, null, destinationPath)
+                                    if (isEncrypted) showPasswordInputMultiRarDialog(filePaths, destinationPath)
+                                    else startRarExtractionService(filePaths, null, destinationPath)
                                 } else {
-                                    startExtractionService(filePaths, null, destinationPath)
+                                    if (isEncrypted) {
+                                        showPasswordInputDialog(filePaths, destinationPath)
+                                    } else {
+                                        startExtractionService(filePaths, null, destinationPath)
+                                    }
                                 }
                             }
                             bottomSheetDialog.dismiss()
@@ -1595,73 +1601,6 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                 bottomSheetDialog.dismiss()
             }
         }
-
-        binding.btnMultiExtract.setOnClickListener {
-            val destinationPath = binding.outputPathInput.text.toString()
-            val loadingDialog = MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
-                .setMessage(getString(R.string.please_wait))
-                .setCancelable(false)
-                .create()
-            loadingDialog.show()
-
-            lifecycleScope.launch(Dispatchers.IO) {
-                val isEncrypted = EncryptionCheckHelper.isEncrypted(file)
-                withContext(Dispatchers.Main) {
-                    loadingDialog.dismiss()
-                    if (isEncrypted) {
-                        showPasswordInputMultiRarDialog(file.absolutePath, destinationPath)
-                    } else {
-                        startRarExtractionService(file.absolutePath, null, destinationPath)
-                    }
-                    bottomSheetDialog.dismiss()
-                }
-            }
-        }
-
-        binding.btnMulti7zExtract.setOnClickListener {
-            val destinationPath = binding.outputPathInput.text.toString()
-            val loadingDialog = MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
-                .setMessage(getString(R.string.please_wait))
-                .setCancelable(false)
-                .create()
-            loadingDialog.show()
-
-            lifecycleScope.launch(Dispatchers.IO) {
-                val isEncrypted = EncryptionCheckHelper.isEncrypted(file)
-                withContext(Dispatchers.Main) {
-                    loadingDialog.dismiss()
-                    if (isEncrypted) {
-                        showPasswordInputMulti7zDialog(file.absolutePath, destinationPath)
-                    } else {
-                        startMulti7zExtractionService(file.absolutePath, null, destinationPath)
-                    }
-                    bottomSheetDialog.dismiss()
-                }
-            }
-        }
-
-        binding.btnMultiZipExtract.setOnClickListener {
-            val destinationPath = binding.outputPathInput.text.toString()
-            val loadingDialog = MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
-                .setMessage(getString(R.string.please_wait))
-                .setCancelable(false)
-                .create()
-            loadingDialog.show()
-
-            lifecycleScope.launch(Dispatchers.IO) {
-                val isEncrypted = EncryptionCheckHelper.isEncrypted(file)
-                withContext(Dispatchers.Main) {
-                    loadingDialog.dismiss()
-                    if (isEncrypted) {
-                        showPasswordInputMultiZipDialog(file.absolutePath, destinationPath)
-                    } else {
-                        startMultiZipExtractionService(file.absolutePath, null, destinationPath)
-                    }
-                    bottomSheetDialog.dismiss()
-                }
-            }
-        }
-
         binding.btnFileInfo.setOnClickListener {
             showFileInfo(file)
             bottomSheetDialog.dismiss()
@@ -2144,8 +2083,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         warningTextView: TextView,
         path: String,
         requiredSize: Long,
-        buttons: List<View>? = null,
-        defaultColor: android.content.res.ColorStateList? = null
+        viewsDefaultColors: Map<View, android.content.res.ColorStateList?>? = null
     ) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -2161,13 +2099,23 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                         warningTextView.text = warningText
                         warningTextView.visibility = View.VISIBLE
                         val errorColor = MaterialColors.getColor(warningTextView, com.google.android.material.R.attr.colorOnError)
-                        buttons?.forEach { it.backgroundTintList = android.content.res.ColorStateList.valueOf(errorColor) }
+                        viewsDefaultColors?.keys?.forEach { view ->
+                            if (view is Chip) {
+                                view.chipBackgroundColor = android.content.res.ColorStateList.valueOf(errorColor)
+                            } else {
+                                view.backgroundTintList = android.content.res.ColorStateList.valueOf(errorColor)
+                            }
+                        }
                     }
                 } else {
                     withContext(Dispatchers.Main) {
                         warningTextView.visibility = View.GONE
-                        if (defaultColor != null) {
-                            buttons?.forEach { it.backgroundTintList = defaultColor }
+                        viewsDefaultColors?.forEach { (view, color) ->
+                            if (view is Chip) {
+                                view.chipBackgroundColor = color
+                            } else {
+                                view.backgroundTintList = color
+                            }
                         }
                     }
                 }

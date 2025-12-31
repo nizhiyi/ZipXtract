@@ -82,6 +82,7 @@ import com.wirelessalien.zipxtract.databinding.ProgressDialogExtractBinding
 import com.wirelessalien.zipxtract.helper.ChecksumUtils
 import com.wirelessalien.zipxtract.helper.EncryptionCheckHelper
 import com.wirelessalien.zipxtract.helper.FileOperationsDao
+import com.wirelessalien.zipxtract.helper.MultipartArchiveHelper
 import com.wirelessalien.zipxtract.model.FileItem
 import com.wirelessalien.zipxtract.service.DeleteFilesService
 import com.wirelessalien.zipxtract.service.ExtractArchiveService
@@ -572,12 +573,7 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
         val bottomSheetDialog = BottomSheetDialog(requireContext())
         bottomSheetDialog.setContentView(binding.root)
 
-        val buttons = listOf(
-            binding.btnExtract,
-            binding.btnMultiExtract,
-            binding.btnMulti7zExtract,
-            binding.btnMultiZipExtract
-        )
+        val buttons = listOf(binding.btnExtract)
 
         val defaultColor = binding.btnExtract.backgroundTintList
 
@@ -677,13 +673,33 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
                     loadingDialog.show()
 
                     lifecycleScope.launch(Dispatchers.IO) {
+                        val isMultipartZip = MultipartArchiveHelper.isMultipartZip(file)
+                        val isMultipart7z = MultipartArchiveHelper.isMultipart7z(file)
+                        val isMultipartRar = MultipartArchiveHelper.isMultipartRar(file)
+
                         val isEncrypted = EncryptionCheckHelper.isEncrypted(file)
                         withContext(Dispatchers.Main) {
                             loadingDialog.dismiss()
-                            if (isEncrypted) {
-                                showPasswordInputDialog(filePaths, destinationPath)
+                            if (isMultipartZip) {
+                                if (isEncrypted) showPasswordInputMultiZipDialog(filePaths, destinationPath)
+                                else startMultiZipExtractionService(filePaths, null, destinationPath)
+                            } else if (isMultipart7z) {
+                                if (isEncrypted) showPasswordInputMulti7zDialog(filePaths, destinationPath)
+                                else startMulti7zExtractionService(filePaths, null, destinationPath)
+                            } else if (isMultipartRar) {
+                                if (isEncrypted) showPasswordInputMultiRarDialog(filePaths, destinationPath)
+                                else startRarExtractionService(filePaths, null, destinationPath)
                             } else {
-                                startExtractionService(filePaths, null, destinationPath)
+                                if (file.extension.equals("rar", ignoreCase = true)) {
+                                    if (isEncrypted) showPasswordInputMultiRarDialog(filePaths, destinationPath)
+                                    else startRarExtractionService(filePaths, null, destinationPath)
+                                } else {
+                                    if (isEncrypted) {
+                                        showPasswordInputDialog(filePaths, destinationPath)
+                                    } else {
+                                        startExtractionService(filePaths, null, destinationPath)
+                                    }
+                                }
                             }
                             bottomSheetDialog.dismiss()
                         }
@@ -703,72 +719,6 @@ class ArchiveFragment : Fragment(), FileAdapter.OnItemClickListener {
                     .addToBackStack(null)
                     .commit()
                 bottomSheetDialog.dismiss()
-            }
-        }
-
-        binding.btnMultiExtract.setOnClickListener {
-            val destinationPath = binding.outputPathInput.text.toString()
-            val loadingDialog = MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
-                .setMessage(getString(R.string.please_wait))
-                .setCancelable(false)
-                .create()
-            loadingDialog.show()
-
-            lifecycleScope.launch(Dispatchers.IO) {
-                val isEncrypted = EncryptionCheckHelper.isEncrypted(file)
-                withContext(Dispatchers.Main) {
-                    loadingDialog.dismiss()
-                    if (isEncrypted) {
-                        showPasswordInputMultiRarDialog(filePath, destinationPath)
-                    } else {
-                        startRarExtractionService(filePath, null, destinationPath)
-                    }
-                    bottomSheetDialog.dismiss()
-                }
-            }
-        }
-
-        binding.btnMulti7zExtract.setOnClickListener {
-            val destinationPath = binding.outputPathInput.text.toString()
-            val loadingDialog = MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
-                .setMessage(getString(R.string.please_wait))
-                .setCancelable(false)
-                .create()
-            loadingDialog.show()
-
-            lifecycleScope.launch(Dispatchers.IO) {
-                val isEncrypted = EncryptionCheckHelper.isEncrypted(file)
-                withContext(Dispatchers.Main) {
-                    loadingDialog.dismiss()
-                    if (isEncrypted) {
-                        showPasswordInputMulti7zDialog(filePath, destinationPath)
-                    } else {
-                        startMulti7zExtractionService(filePath, null, destinationPath)
-                    }
-                    bottomSheetDialog.dismiss()
-                }
-            }
-        }
-
-        binding.btnMultiZipExtract.setOnClickListener {
-            val destinationPath = binding.outputPathInput.text.toString()
-            val loadingDialog = MaterialAlertDialogBuilder(requireContext(), R.style.MaterialDialog)
-                .setMessage(getString(R.string.please_wait))
-                .setCancelable(false)
-                .create()
-            loadingDialog.show()
-
-            lifecycleScope.launch(Dispatchers.IO) {
-                val isEncrypted = EncryptionCheckHelper.isEncrypted(file)
-                withContext(Dispatchers.Main) {
-                    loadingDialog.dismiss()
-                    if (isEncrypted) {
-                        showPasswordInputMultiZipDialog(filePath, destinationPath)
-                    } else {
-                        startMultiZipExtractionService(filePath, null, destinationPath)
-                    }
-                    bottomSheetDialog.dismiss()
-                }
             }
         }
 
