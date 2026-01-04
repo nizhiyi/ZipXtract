@@ -899,47 +899,17 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                             true
                         }
                         R.id.m_archive_7z -> {
-                            val fragmentManager = parentFragmentManager
-                            val newFragment = SevenZOptionDialogFragment.newInstance(adapter)
-
-                            // Show the fragment fullscreen.
-                            val transaction = fragmentManager.beginTransaction()
-                            transaction.setTransition(FragmentTransaction.TRANSIT_FRAGMENT_OPEN)
-                            transaction.add(android.R.id.content, newFragment)
-                                .addToBackStack(null)
-                                .commit()
-
-                            actionMode?.finish() // Destroy the action mode
+                            show7zOptionsDialog()
                             true
                         }
 
                         R.id.m_archive_zip -> {
-                            val fragmentManager = parentFragmentManager
-                            val newFragment = ZipOptionDialogFragment.newInstance(adapter)
-
-                            // Show the fragment fullscreen.
-                            val transaction = fragmentManager.beginTransaction()
-                            transaction.setTransition(FragmentTransaction.TRANSIT_FRAGMENT_OPEN)
-                            transaction.add(android.R.id.content, newFragment)
-                                .addToBackStack(null)
-                                .commit()
-
-                            actionMode?.finish() // Destroy the action mode
+                            showZipOptionsDialog()
                             true
                         }
 
                         R.id.m_archive_tar -> {
-                            val fragmentManager = parentFragmentManager
-                            val newFragment = TarOptionsDialogFragment.newInstance(adapter)
-
-                            // Show the fragment fullscreen.
-                            val transaction = fragmentManager.beginTransaction()
-                            transaction.setTransition(FragmentTransaction.TRANSIT_FRAGMENT_OPEN)
-                            transaction.add(android.R.id.content, newFragment)
-                                .addToBackStack(null)
-                                .commit()
-
-                            actionMode?.finish() // Destroy the action mode
+                            showTarOptionsDialog()
                             true
                         }
 
@@ -970,7 +940,8 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
 
                 override fun onDestroyActionMode(mode: ActionMode?) {
                     actionMode = null
-//                    clearSelection()
+                    selectedFiles.clear()
+                    adapter.clearSelection()
                 }
             })
         }
@@ -1959,6 +1930,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
     private suspend fun getFiles(): ArrayList<FileItem> = withContext(Dispatchers.IO) {
         val files = ArrayList<FileItem>()
         val directories = ArrayList<FileItem>()
+        val showHiddenFiles = sharedPreferences.getBoolean("show_hidden_files", false)
 
         val directory = File(currentPath ?: Environment.getExternalStorageDirectory().absolutePath)
 
@@ -1977,6 +1949,8 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                 Files.newDirectoryStream(directory.toPath()).use { directoryStream ->
                     for (path in directoryStream) {
                         val file = path.toFile()
+                        if (!showHiddenFiles && file.name.startsWith(".")) continue
+
                         if (file.isDirectory) {
                             directories.add(FileItem.fromFile(file))
                         } else {
@@ -1986,10 +1960,12 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                // Fallback if  error
+                // Fallback if error
                 val fileList = directory.listFiles()
                 if (fileList != null) {
                     for (file in fileList) {
+                        if (!showHiddenFiles && file.name.startsWith(".")) continue
+
                         if (file.isDirectory) {
                             directories.add(FileItem.fromFile(file))
                         } else {
@@ -2002,6 +1978,8 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
             val fileList = directory.listFiles()
             if (fileList != null) {
                 for (file in fileList) {
+                    if (!showHiddenFiles && file.name.startsWith(".")) continue
+
                     if (file.isDirectory) {
                         directories.add(FileItem.fromFile(file))
                     } else {
@@ -2218,28 +2196,37 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
 
     private fun searchAllFiles(directory: File, query: String): Flow<List<FileItem>> = flow {
         val results = mutableListOf<FileItem>()
+        val showHiddenFiles = sharedPreferences.getBoolean("show_hidden_files", false)
+        var lastEmitTime = 0L
 
         suspend fun searchRecursively(dir: File) {
             val files = dir.listFiles() ?: return
 
             for (file in files) {
+                if (!showHiddenFiles && file.name.startsWith(".")) continue
+
                 if (!currentCoroutineContext().isActive) return
 
                 if (file.isDirectory) {
                     searchRecursively(file)
                 } else if (file.name.contains(query, true)) {
                     results.add(FileItem.fromFile(file))
-                    emit(results.toList())
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastEmitTime > 300) {
+                        emit(results.toList())
+                        lastEmitTime = currentTime
+                    }
                 }
             }
         }
 
         searchRecursively(directory)
-        emit(results)
+        emit(results.toList())
     }.distinctUntilChanged { old, new -> old.size == new.size }
 
     private fun searchFilesWithMediaStore(query: String): Flow<List<FileItem>> = flow {
         val results = mutableListOf<FileItem>()
+        val showHiddenFiles = sharedPreferences.getBoolean("show_hidden_files", false)
         val projection = arrayOf(
             MediaStore.Files.FileColumns.DATA,
             MediaStore.Files.FileColumns.DISPLAY_NAME
@@ -2259,19 +2246,29 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                 sortOrder
             )?.use { cursor ->
                 val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
+                var lastEmitTime = 0L
                 while (cursor.moveToNext()) {
+                    if (!currentCoroutineContext().isActive) break
+
                     val filePath = cursor.getString(dataColumn)
                     val file = File(filePath)
+
+                    if (!showHiddenFiles && file.name.startsWith(".")) continue
+
                     if (file.exists()) {
                         results.add(FileItem.fromFile(file))
-                        emit(results.toList())
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastEmitTime > 300) {
+                            emit(results.toList())
+                            lastEmitTime = currentTime
+                        }
                     }
                 }
             }
         } catch (_: Exception) {
             // exceptions
         }
-        emit(results)
+        emit(results.toList())
     }.distinctUntilChanged { old, new -> old.size == new.size }
 
     companion object {
