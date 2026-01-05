@@ -20,24 +20,10 @@
     android:layout_height="match_parent"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <com.google.android.material.appbar.AppBarLayout
-        android:id="@+id/appBarLayout"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:fitsSystemWindows="true">
-
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="?attr/actionBarSize"/>
-    </com.google.android.material.appbar.AppBarLayout>
-
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        app:layout_behavior="com.google.android.material.appbar.AppBarLayout$ScrollingViewBehavior">
+        android:orientation="vertical">
 
         <com.google.android.material.progressindicator.LinearProgressIndicator
             android:id="@+id/progressBar"
@@ -52,7 +38,7 @@
             android:id="@+id/horizontalScrollView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_below="@id/storageInfoLayout"
+            android:layout_below="@id/progressBar"
             android:layout_marginStart="16dp"
             android:layout_marginEnd="16dp"
             android:scrollIndicators="none"
@@ -114,44 +100,6 @@
                     app:singleLine="true"/>
             </LinearLayout>
         </HorizontalScrollView>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/storageInfoLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_below="@id/progressBar"
-            style="@style/Widget.Material3.CardView.Elevated"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="4dp"
-            android:elevation="0dp"
-            android:visibility="gone"
-            app:cardCornerRadius="8dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginStart="16dp"
-                android:layout_marginEnd="16dp"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="8dp">
-
-                <TextView
-                    android:id="@+id/storageInfoText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textSize="12sp"
-                    android:layout_marginBottom="4dp"/>
-
-                <com.google.android.material.progressindicator.LinearProgressIndicator
-                    android:id="@+id/storageProgressBar"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:trackCornerRadius="4dp"/>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
 
         <com.google.android.material.progressindicator.CircularProgressIndicator
             android:id="@+id/circularProgressBar"
