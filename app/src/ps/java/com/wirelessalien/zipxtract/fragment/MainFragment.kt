@@ -414,7 +414,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
             }
         }, viewLifecycleOwner, Lifecycle.State.RESUMED)
 
-        currentPath = arguments?.getString("path")
+        currentPath = arguments?.getString("path") ?: arguments?.getString(ARG_DIRECTORY_PATH)
         searchHandler = Handler(Looper.getMainLooper())
 
         lifecycleScope.launch {
@@ -514,11 +514,6 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         updateCurrentPathChip()
 
         handleOpenWithIntent()
-
-        val directoryPath = arguments?.getString(ARG_DIRECTORY_PATH)
-        if (directoryPath != null) {
-            navigateToPath(directoryPath)
-        }
 
         binding.storageWarningText.setOnClickListener {
             try {
@@ -635,20 +630,15 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
     }
 
     private fun navigateToPath(path: String) {
-        if (isAdded) {
-            unselectAllFiles()
+        val fragment = MainFragment().apply {
+            arguments = Bundle().apply {
+                putString("path", path)
+            }
         }
-        fileLoadingJob?.cancel()
-        stopFileObserver()
-        processEventsJob?.cancel()
-        synchronized(pendingFileEvents) {
-            pendingFileEvents.clear()
-        }
-        currentPath = path
-        startFileObserver()
-        updateCurrentPathChip()
-        updateAdapterWithFullList()
-        updateStorageInfo(path)
+        parentFragmentManager.beginTransaction()
+            .replace(R.id.container, fragment)
+            .addToBackStack(null)
+            .commit()
     }
 
     private fun updateStorageInfo(path: String) {
@@ -666,9 +656,9 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                 val stat = StatFs(rootPath)
                 val totalSize = stat.totalBytes
                 val availableSize = stat.availableBytes
-                val usedSize = totalSize - availableSize
+//                val usedSize = totalSize - availableSize
 
-                val progress = if (totalSize > 0) ((usedSize.toDouble() / totalSize) * 100).toInt() else 0
+//                val progress = if (totalSize > 0) ((usedSize.toDouble() / totalSize) * 100).toInt() else 0
                 val availablePercentage = if (totalSize > 0) ((availableSize.toDouble() / totalSize) * 100).toInt() else 0
 
                 val totalSizeStr = android.text.format.Formatter.formatFileSize(requireContext(), totalSize)
@@ -860,16 +850,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                 return
             }
             if (file.isDirectory) {
-                val fragment = MainFragment().apply {
-                    arguments = Bundle().apply {
-                        putString("path", file.absolutePath)
-                    }
-                }
-                parentFragmentManager.beginTransaction()
-                    .replace(R.id.container, fragment)
-                    .addToBackStack(null)
-                    .commit()
-
+                navigateToPath(file.absolutePath)
             } else {
                 if (file.extension.equals("tar", ignoreCase = true)) {
                     showCompressorArchiveDialog(filePath, file)
@@ -1224,16 +1205,19 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
 
 
     private fun stopFileObserver() {
-        // Stop the file observer when the activity is destroyed
         fileObserver?.stopWatching()
         isObserving = false
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stopFileObserver()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         fileLoadingJob?.cancel()
         coroutineScope.cancel()
-        stopFileObserver()
         LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(extractionReceiver)
     }
 
@@ -2081,6 +2065,14 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                         }
                         adapter.updateFilesAndFilter(fullFileList, currentQuery)
                         binding.swipeRefreshLayout.isRefreshing = false
+
+                        val highlightFilePath = arguments?.getString(ARG_HIGHLIGHT_FILE_PATH)
+                        if (highlightFilePath != null) {
+                            highlightFile(highlightFilePath)
+                            arguments?.remove(ARG_HIGHLIGHT_FILE_PATH)
+                        } else {
+                            adapter.clearHighlight()
+                        }
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
@@ -2161,22 +2153,23 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         adapter.updateFilesAndFilter(ArrayList(), currentQuery)
 
         val fastSearchEnabled = sharedPreferences.getBoolean("fast_search", false)
+        val context = requireContext()
 
         // Cancel previous search if any
         searchJob?.cancel()
 
         searchJob = coroutineScope.launch {
             val searchFlow = if (fastSearchEnabled) {
-                searchFilesWithMediaStore(query)
+                searchFilesWithMediaStore(query, context)
             } else {
                 val basePath = Environment.getExternalStorageDirectory().absolutePath
-                val sdCardPath = StorageHelper.getSdCardPath(requireContext())
+                val sdCardPath = StorageHelper.getSdCardPath(context)
                 val searchPath = if (currentPath?.startsWith(sdCardPath ?: "") == true) {
                     sdCardPath ?: basePath
                 } else {
                     basePath
                 }
-                searchAllFiles(File(searchPath), query)
+                searchAllFiles(File(searchPath), query, context)
             }
 
             searchFlow
@@ -2204,7 +2197,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         }
     }
 
-    private fun searchAllFiles(directory: File, query: String): Flow<List<FileItem>> = flow {
+    private fun searchAllFiles(directory: File, query: String, context: Context): Flow<List<FileItem>> = flow {
         val results = mutableListOf<FileItem>()
         val showHiddenFiles = sharedPreferences.getBoolean("show_hidden_files", false)
         var lastEmitTime = 0L
@@ -2213,11 +2206,24 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
             val files = dir.listFiles() ?: return
 
             for (file in files) {
+                val filePath = file.absolutePath
+                if (StorageHelper.isAndroidDataDir(filePath, context)) {
+                    continue
+                }
+
                 if (!showHiddenFiles && file.name.startsWith(".")) continue
 
                 if (!currentCoroutineContext().isActive) return
 
                 if (file.isDirectory) {
+                    if (file.name.contains(query, true)) {
+                        results.add(FileItem.fromFile(file))
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastEmitTime > 300) {
+                            emit(results.toList())
+                            lastEmitTime = currentTime
+                        }
+                    }
                     searchRecursively(file)
                 } else if (file.name.contains(query, true)) {
                     results.add(FileItem.fromFile(file))
@@ -2234,7 +2240,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         emit(results.toList())
     }.distinctUntilChanged { old, new -> old.size == new.size }
 
-    private fun searchFilesWithMediaStore(query: String): Flow<List<FileItem>> = flow {
+    private fun searchFilesWithMediaStore(query: String, context: Context): Flow<List<FileItem>> = flow {
         val results = mutableListOf<FileItem>()
         val showHiddenFiles = sharedPreferences.getBoolean("show_hidden_files", false)
         val projection = arrayOf(
@@ -2248,7 +2254,7 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         val queryUri = MediaStore.Files.getContentUri("external")
 
         try {
-            requireActivity().contentResolver.query(
+            context.contentResolver.query(
                 queryUri,
                 projection,
                 selection,
@@ -2261,6 +2267,11 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
                     if (!currentCoroutineContext().isActive) break
 
                     val filePath = cursor.getString(dataColumn)
+
+                    if (filePath == null || StorageHelper.isAndroidDataDir(filePath, context)) {
+                        continue
+                    }
+
                     val file = File(filePath)
 
                     if (!showHiddenFiles && file.name.startsWith(".")) continue
@@ -2281,9 +2292,36 @@ class MainFragment : Fragment(), FileAdapter.OnItemClickListener, FileAdapter.On
         emit(results.toList())
     }.distinctUntilChanged { old, new -> old.size == new.size }
 
+    fun navigateToPathAndHighlight(directoryPath: String, highlightFilePath: String) {
+        if (directoryPath == currentPath) {
+            highlightFile(highlightFilePath)
+        } else {
+            val fragment = MainFragment().apply {
+                arguments = Bundle().apply {
+                    putString(ARG_DIRECTORY_PATH, directoryPath)
+                    putString(ARG_HIGHLIGHT_FILE_PATH, highlightFilePath)
+                }
+            }
+            parentFragmentManager.beginTransaction()
+                .replace(R.id.container, fragment)
+                .addToBackStack(null)
+                .commit()
+        }
+    }
+
+    private fun highlightFile(filePath: String) {
+        val position = adapter.files.indexOfFirst { it.file.absolutePath == filePath }
+        if (position != -1) {
+            binding.recyclerView.scrollToPosition(position)
+            val fileItem = adapter.files[position]
+            adapter.highlightFile(fileItem.file)
+        }
+    }
+
     companion object {
         const val ARG_JOB_ID = "com.wirelessalien.zipxtract.ARG_JOB_ID"
         const val ARG_ARCHIVE_TYPE = "com.wirelessalien.zipxtract.ARG_ARCHIVE_TYPE"
         const val ARG_DIRECTORY_PATH = "com.wirelessalien.zipxtract.ARG_DIRECTORY_PATH"
+        const val ARG_HIGHLIGHT_FILE_PATH = "com.wirelessalien.zipxtract.ARG_HIGHLIGHT_FILE_PATH"
     }
 }
