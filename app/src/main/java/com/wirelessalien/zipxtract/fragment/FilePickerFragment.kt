@@ -17,15 +17,18 @@
 
 package com.wirelessalien.zipxtract.fragment
 
+import android.app.Dialog
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.PopupMenu
 import androidx.appcompat.view.ActionMode
+import androidx.core.view.WindowCompat
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.bottomsheet.BottomSheetBehavior
@@ -72,6 +75,14 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
     private var currentPath: String = Environment.getExternalStorageDirectory().absolutePath
     private var listener: FilePickerListener? = null
 
+    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+        val dialog = super.onCreateDialog(savedInstanceState)
+        dialog.window?.let { window ->
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+        }
+        return dialog
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -83,6 +94,7 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        isCancelable = false
 
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(requireContext())
         sortBy = SortBy.valueOf(sharedPreferences.getString("sortBy", SortBy.SORT_BY_NAME.name) ?: SortBy.SORT_BY_NAME.name)
@@ -104,7 +116,7 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
         binding.recyclerView.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerView.adapter = adapter
 
-        binding.fabBack.setOnClickListener {
+        binding.btnBackTop.setOnClickListener {
             handleBackNavigation()
         }
         binding.btnCancel.setOnClickListener {
@@ -155,6 +167,15 @@ class FilePickerFragment : BottomSheetDialogFragment(), FilePickerAdapter.OnItem
         loadFiles(currentPath)
         updateCurrentPathChip()
         updateSelectedCount()
+
+        dialog?.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                handleBackNavigation()
+                true
+            } else {
+                false
+            }
+        }
     }
 
     private fun updateSelectedCount() {

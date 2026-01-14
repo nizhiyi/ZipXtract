@@ -24,7 +24,6 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginTop="16dp"
         android:orientation="vertical">
 
         <RelativeLayout
@@ -32,13 +31,24 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
             android:layout_marginEnd="16dp"
-            android:layout_marginBottom="11dp"
             android:layout_marginTop="10dp">
+
+            <ImageButton
+                android:id="@+id/btnBackTop"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_alignParentStart="true"
+                android:layout_centerVertical="true"
+                android:layout_marginStart="-16dp"
+                android:src="@drawable/ic_arrow_back_default"
+                app:tint="?attr/colorOnSurface" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/select_directory"
+                android:layout_toEndOf="@id/btnBackTop"
                 android:layout_centerVertical="true"
                 android:textAppearance="@style/TextAppearance.Material3.TitleLarge"/>
 
@@ -74,6 +84,7 @@
                     android:text="@string/internal_storage"
                     android:clickable="true"
                     android:checkable="false"
+                    android:layout_marginEnd="8dp"
                     app:shapeAppearance="@style/ShapeAppearance.Material3.Corner.Full"
                     android:visibility="visible" />
 
@@ -135,11 +146,12 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnCancel"
-                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_centerVertical="true"
-                app:icon="@drawable/ic_close"/>
+                android:layout_toStartOf="@id/btnSelect"
+                android:text="@string/cancel"/>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSelect"
@@ -147,17 +159,8 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_centerVertical="true"
-                android:layout_toEndOf="@id/btnCancel"
-                android:text="@string/select" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/fabBack"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
                 android:layout_alignParentEnd="true"
-                android:layout_centerVertical="true"
-                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
-                app:icon="@drawable/ic_arrow_back"/>
+                android:text="@string/select" />
         </RelativeLayout>
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
