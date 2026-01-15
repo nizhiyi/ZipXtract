@@ -15,7 +15,7 @@ ZipXtract is a fully open-source Android application designed for comprehensive 
 ## Key Features
 
 ### Comprehensive Extraction Capabilities
-*   **Wide Format Support:** RAR (including RAR5 and multi-volume), ZIP (password-protected and split), TAR, BZ2, GZ, ZST, 7z (password-protected and multi-volume), XZ, JAR, and more.
+*   **Wide Format Support:** RAR (including RAR5 and multi-volume), ZIP (password-protected and split), 7z (password-protected and multi-volume), TAR, GZ, BZ2, XZ, ZST, ISO, CAB, DEB, RPM, DMG, WIM, CHM, LZ4, Brotli (BR), Lzip, JAR, and many more.
 *   **Encrypted Archives:** Handles password-protected ZIP and 7z files.
 *   **Multi-Volume Archives:** Seamlessly extracts multi-volume RAR and 7z archives.
 *   **Split Archives:** Support for extracting split ZIP files.
@@ -33,10 +33,6 @@ Get ZipXtract from your preferred source:
 | :----------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------- |
 | [<img src="https://github.com/WirelessAlien/ZipXtract/assets/121420261/3857dcf6-8560-4b1a-bfcd-0e12afa18b95" alt="Get it on GitHub" height="60">](https://github.com/WirelessAlien/ZipXtract/releases) | **Full Version:** Includes all features (RAR, 7z). |
 | [<img src="https://gitlab.com/IzzyOnDroid/repo/-/raw/master/assets/IzzyOnDroid.png" alt="Get it on IzzyOnDroid" height="60">](https://apt.izzysoft.de/fdroid/index/apk/com.wirelessalien.zipxtract/) | **Full Version:** Includes all features (RAR, 7z). |
-| [<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="60">](https://f-droid.org/en/packages/com.wirelessalien.zipxtract/) | **Limited Version:** RAR extraction and 7z compression are not available due to licensing. |
-
-> [!IMPORTANT]
-> For the complete feature set, including RAR extraction and 7z compression, please download ZipXtract from **GitHub Releases** or **IzzyOnDroid**. The F-Droid version has these features removed due to licensing restrictions.
 
 ## How to Use
 
